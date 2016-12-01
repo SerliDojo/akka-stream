@@ -29,3 +29,6 @@
 7ème exo : double sortie (réponse http)
 - création d'une réponse
 - réponse asynchrone
+
+Ressources :
+- http://doc.akka.io/docs/akka/2.4.4/java/stream/stream-graphs.html
