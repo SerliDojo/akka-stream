@@ -2,14 +2,14 @@ package dojo;
 
 import akka.NotUsed;
 import akka.actor.ActorSystem;
+import akka.japi.function.Creator;
 import akka.japi.function.Function;
 import akka.stream.ActorMaterializer;
-import akka.stream.javadsl.FileIO;
-import akka.stream.javadsl.Flow;
-import akka.stream.javadsl.Framing;
-import akka.stream.javadsl.Sink;
+import akka.stream.javadsl.*;
 import akka.util.ByteString;
+import akka.util.ByteStringBuilder;
 
+import java.io.OutputStream;
 import java.net.URISyntaxException;
 import java.nio.file.Paths;
 import java.util.*;
@@ -34,19 +34,20 @@ public class Application {
                 .map(Set::stream)
                 .map(stream -> stream
                         .map(entry -> entry.getKey() + ": " + entry.getValue())
-                        .collect(Collectors.joining(", ")));
+                        .collect(Collectors.joining(", ", "", "\n")));
 
         ActorSystem system = ActorSystem.create();
 
         FileIO.fromPath(Paths.get(Application.class.getClassLoader().getResource(name).toURI()))
                 .via(Framing.delimiter(ByteString.fromString("\n"), 10000))
                 .map(ByteString::utf8String)
-
                 //.via(errorsOnly)
                 .via(metadataExtractor)
                 .mapConcat(Application::removeIfAbsent)
                 .via(metadataInliner)
-                .runWith(Sink.foreach(System.err::println), ActorMaterializer.create(system))
+                .map(ByteString::fromString)
+                .runWith(StreamConverters.fromOutputStream(() -> System.err), ActorMaterializer.create(system))
+                //.runWith(Sink.foreach(System.err::println), ActorMaterializer.create(system))
                 .whenComplete((ok, ko) -> system.terminate());
     }
 
