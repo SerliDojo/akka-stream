@@ -41,14 +41,15 @@ public class Application {
         FileIO.fromPath(Paths.get(Application.class.getClassLoader().getResource(name).toURI()))
                 .via(Framing.delimiter(ByteString.fromString("\n"), 10000))
                 .map(ByteString::utf8String)
-                .via(stacktrace())
+//                .via(stacktrace())
                 //.via(errorsOnly)
-                //.via(metadataExtractor)
-                //.mapConcat(Application::removeIfAbsent)
-                //.via(metadataInliner)
-                //.map(ByteString::fromString)
+                .via(metadataExtractor)
+                .mapConcat(Application::removeIfAbsent)
+                .via(metadataInliner)
+                .map(ByteString::fromString)
+                .runWith(FileIO.toPath(Paths.get("target", "sortie.out")), ActorMaterializer.create(system))
                 //.runWith(StreamConverters.fromOutputStream(() -> System.err), ActorMaterializer.create(system))
-                .runWith(Sink.foreach(System.err::println), ActorMaterializer.create(system))
+                //.runWith(Sink.foreach(System.err::println), ActorMaterializer.create(system))
                 .whenComplete((ok, ko) -> system.terminate());
     }
 
