@@ -41,13 +41,14 @@ public class Application {
         FileIO.fromPath(Paths.get(Application.class.getClassLoader().getResource(name).toURI()))
                 .via(Framing.delimiter(ByteString.fromString("\n"), 10000))
                 .map(ByteString::utf8String)
+                .via(stacktrace())
                 //.via(errorsOnly)
-                .via(metadataExtractor)
-                .mapConcat(Application::removeIfAbsent)
-                .via(metadataInliner)
-                .map(ByteString::fromString)
-                .runWith(StreamConverters.fromOutputStream(() -> System.err), ActorMaterializer.create(system))
-                //.runWith(Sink.foreach(System.err::println), ActorMaterializer.create(system))
+                //.via(metadataExtractor)
+                //.mapConcat(Application::removeIfAbsent)
+                //.via(metadataInliner)
+                //.map(ByteString::fromString)
+                //.runWith(StreamConverters.fromOutputStream(() -> System.err), ActorMaterializer.create(system))
+                .runWith(Sink.foreach(System.err::println), ActorMaterializer.create(system))
                 .whenComplete((ok, ko) -> system.terminate());
     }
 
@@ -66,5 +67,45 @@ public class Application {
                     return result;
                 });
     }
+
+
+
+    private static Flow<String, String, NotUsed> stacktrace() {
+        return Flow.<String>create()
+                .statefulMapConcat(() -> {
+                    //Structure mutable permettant d'accumuler les stacktraces
+                    final List<String> acc = new ArrayList<>();
+                    //Pattern pattern = Pattern.compile(regex);
+                    return str -> {
+                        //Au début la liste est vide on met la première ligne dedans
+                        if(acc.isEmpty()) {
+                            acc.add(str);
+                            return Collections.emptyList();
+                        } else {
+                            // Cas d'une exception on accumule dans la liste
+                            if(str.isEmpty() || str.startsWith("\t") || str.equals("\n") || str.matches("^[a-z]+\\..*$")) {
+                                acc.add(str);
+                                return Collections.emptyList();
+                            } else {
+                                // Il y'a juste une ligne, on met pas de \n à la fin
+                                if(acc.size() == 1) {
+                                    String concat = acc.get(0) + "\n ------------------------------------------------" ;
+                                    acc.clear();
+                                    acc.add(str);
+                                    //return Collections.emptyList();
+                                    return Collections.singleton(concat);
+                                    // Stack trace : on ajoute une saut de ligne entre chaque :
+                                } else {
+                                    String concat =  acc.stream().collect(Collectors.joining("\n")) + "\n ------------------------------------------------";
+                                    acc.clear();
+                                    acc.add(str);
+                                    return Collections.singleton(concat);
+                                }
+                            }
+                        }
+                    };
+                });
+    }
+
 
 }
