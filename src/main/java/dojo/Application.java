@@ -4,7 +4,7 @@ import akka.NotUsed;
 import akka.actor.ActorSystem;
 import akka.japi.function.Creator;
 import akka.japi.function.Function;
-import akka.stream.ActorMaterializer;
+import akka.stream.*;
 import akka.stream.javadsl.*;
 import akka.util.ByteString;
 import akka.util.ByteStringBuilder;
@@ -13,6 +13,7 @@ import java.io.OutputStream;
 import java.net.URISyntaxException;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CompletionStage;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -38,19 +39,56 @@ public class Application {
 
         ActorSystem system = ActorSystem.create();
 
-        FileIO.fromPath(Paths.get(Application.class.getClassLoader().getResource(name).toURI()))
+        Source<String, CompletionStage<IOResult>> fileSource = FileIO.fromPath(Paths.get(Application.class.getClassLoader().getResource(name).toURI()))
                 .via(Framing.delimiter(ByteString.fromString("\n"), 10000))
-                .map(ByteString::utf8String)
+                .map(ByteString::utf8String);
 //                .via(stacktrace())
                 //.via(errorsOnly)
+
+        Flow<String, ByteString, NotUsed> shipFlow = Flow.<String> create()
+                .via(errorsOnly)
                 .via(metadataExtractor)
                 .mapConcat(Application::removeIfAbsent)
                 .via(metadataInliner)
-                .map(ByteString::fromString)
-                .runWith(FileIO.toPath(Paths.get("target", "sortie.out")), ActorMaterializer.create(system))
-                //.runWith(StreamConverters.fromOutputStream(() -> System.err), ActorMaterializer.create(system))
-                //.runWith(Sink.foreach(System.err::println), ActorMaterializer.create(system))
-                .whenComplete((ok, ko) -> system.terminate());
+                .map(ByteString::fromString);
+
+
+        Sink<ByteString, CompletionStage<IOResult>> toFileSink = FileIO.toPath(Paths.get("target", "sortie.out"));
+        Sink<ByteString, CompletionStage<IOResult>> toConsoleSink = StreamConverters.fromOutputStream(() -> System.err);
+
+        Graph<ClosedShape, CompletionStage<IOResult>> graph = GraphDSL.create(toFileSink, (b, file) -> {
+            final UniformFanOutShape<ByteString, ByteString> bcast = b.add(Broadcast.create(2));
+
+            FlowShape<String, ByteString> toShipFlow = b.add(shipFlow);
+
+
+            b.from(toShipFlow).viaFanOut(bcast).to(file);
+            //b.from(bcast).to(console);
+
+            return ClosedShape.getInstance();//SinkShape.of(toShipFlow.in());
+        });
+        RunnableGraph.fromGraph(graph).run(ActorMaterializer.create(system))
+                .whenComplete((ok, ko) -> system.terminate());;
+
+//        Graph<String, CompletionStage<IOResult>> sink = GraphDSL.create(toFileSink, (b, file) -> {
+//            final UniformFanOutShape<ByteString, ByteString> bcast = b.add(Broadcast.create(2));
+//
+//            FlowShape<String, ByteString> toShipFlow = b.add(shipFlow);
+//
+//
+//            b.from(toShipFlow).viaFanOut(bcast).to(file);
+//            //b.from(bcast).to(console);
+//
+//            return ClosedShape.getInstance();//SinkShape.of(toShipFlow.in());
+//        });
+//        fileSource.runWith(
+//                sink, ActorMaterializer.create(system))
+//                .whenComplete((ok, ko) -> system.terminate());
+
+
+
+        system.terminate();
+        //.whenComplete((ok, ko) -> system.terminate());
     }
 
     private static Iterable<Map<String, String>> removeIfAbsent(Optional<Map<String, String>> entry) {
